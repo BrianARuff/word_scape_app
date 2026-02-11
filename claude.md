@@ -170,7 +170,7 @@ const state = {
   currentLevel: 1,
   foundWords: [], // words found in current puzzle
   bonusWordsFound: [], // bonus words found in current puzzle
-  hintsRemaining: 3,
+  hintsRemaining: 5,
   currentSwipe: [], // letters currently being swiped (indices into the wheel)
   revealedCells: new Set(), // grid cells that have been revealed (by hint or word found)
 };
