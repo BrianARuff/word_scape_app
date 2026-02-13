@@ -1,86 +1,90 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="theme-color" content="#6c63a8" />
-    <title>Wordscape</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;800;900&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="./css/styles.css" />
-  </head>
-  <body>
-    <div id="game-container">
-      <!-- Header -->
-      <header>
-        <span id="level-display">Level 1</span>
-        <div class="header-right">
-          <button id="hint-btn" type="button">
-            <span class="icon">💡</span>
-            <span id="hint-count">5</span>
-          </button>
-          <button id="reset-btn" type="button" title="Reset Progress">⟲</button>
-        </div>
-      </header>
 
-      <!-- Bonus Words Bar -->
-      <div id="bonus-bar">
-        <button id="bonus-btn" type="button">
-          <span>Bonus</span>
-          <span id="bonus-count" class="bonus-badge">0</span>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#6c63a8" />
+  <title>Wordscape</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;800;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./css/styles.css" />
+</head>
+
+<body>
+  <div id="game-container">
+    <!-- Header -->
+    <header>
+      <span id="level-display">Current Level 1</span>
+      <div class="header-right">
+        <button id="hint-btn" type="button">
+          <span class="icon">💡</span>
+          <span id="hint-count">5</span>
         </button>
-        <div id="bonus-charge-meter" aria-label="Hint charge meter">
-          <span class="charge-label">Hint Charge</span>
-          <div class="bonus-charge-track" role="presentation">
-            <span class="bonus-charge-pip"></span>
-            <span class="bonus-charge-pip"></span>
-            <span class="bonus-charge-pip"></span>
-          </div>
-        </div>
+        <button id="reset-btn" type="button" title="Reset Progress">⟲</button>
       </div>
+    </header>
 
-      <!-- Bonus Words Panel -->
-      <div id="bonus-panel">
-        <div class="bonus-panel-header">
-          <h3>Bonus Words</h3>
-          <button id="bonus-close" type="button">&times;</button>
-        </div>
-        <div id="bonus-words-list">
-          <p class="bonus-empty">Find bonus words from the letter wheel!</p>
-        </div>
-      </div>
-      <div id="bonus-backdrop"></div>
-
-      <!-- Crossword Grid -->
-      <div id="grid-area">
-        <div id="grid-container"></div>
-      </div>
-
-      <!-- Current Word Display -->
-      <div id="current-word"></div>
-
-      <!-- Letter Wheel -->
-      <div id="wheel-area">
-        <div id="wheel-container"></div>
-      </div>
-
-      <!-- Toast -->
-      <div id="toast"></div>
-
-      <!-- Level Complete Overlay -->
-      <div id="level-complete">
-        <div class="complete-content">
-          <div class="complete-star">⭐</div>
-          <h2>Level Complete!</h2>
-          <p>Level <span id="complete-level-num">1</span> cleared</p>
-          <button id="next-level-btn" type="button">Continue</button>
+    <!-- Bonus Words Bar -->
+    <div id="bonus-bar">
+      <button id="bonus-btn" type="button">
+        <span>Bonus</span>
+        <span id="bonus-count" class="bonus-badge">0</span>
+      </button>
+      <div id="bonus-charge-meter" aria-label="Hint charge meter">
+        <span class="charge-label">Hint Charge</span>
+        <div class="bonus-charge-track" role="presentation">
+          <span class="bonus-charge-pip"></span>
+          <span class="bonus-charge-pip"></span>
+          <span class="bonus-charge-pip"></span>
         </div>
       </div>
     </div>
 
-    <script type="module" src="./js/main.js"></script>
-  </body>
+    <!-- Bonus Words Panel -->
+    <div id="bonus-panel">
+      <div class="bonus-panel-header">
+        <h3>Bonus Words</h3>
+        <button id="bonus-close" type="button">&times;</button>
+      </div>
+      <div id="bonus-words-list">
+        <p class="bonus-empty">Find bonus words from the letter wheel!</p>
+      </div>
+    </div>
+    <div id="bonus-backdrop"></div>
+
+    <!-- Crossword Grid -->
+    <div id="grid-area">
+      <div id="grid-container"></div>
+    </div>
+
+    <!-- Current Word Display -->
+    <div id="current-word"></div>
+
+    <!-- Letter Wheel -->
+    <div id="wheel-area">
+      <div id="wheel-container"></div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast"></div>
+
+    <!-- Level Complete Overlay -->
+    <div id="level-complete">
+      <div class="complete-content">
+        <div class="complete-star">⭐</div>
+        <h2>Level Complete!</h2>
+        <p>Level <span id="complete-level-num">1</span> cleared</p>
+        <button id="next-level-btn" type="button">Continue</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./js/main.js"></script>
+</body>
+
 </html>
