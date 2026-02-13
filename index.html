@@ -20,7 +20,7 @@
         <div class="header-right">
           <button id="hint-btn" type="button">
             <span class="icon">💡</span>
-            <span id="hint-count">3</span>
+            <span id="hint-count">5</span>
           </button>
           <button id="reset-btn" type="button" title="Reset Progress">⟲</button>
         </div>
@@ -32,6 +32,14 @@
           <span>Bonus</span>
           <span id="bonus-count" class="bonus-badge">0</span>
         </button>
+        <div id="bonus-charge-meter" aria-label="Hint charge meter">
+          <span class="charge-label">Hint Charge</span>
+          <div class="bonus-charge-track" role="presentation">
+            <span class="bonus-charge-pip"></span>
+            <span class="bonus-charge-pip"></span>
+            <span class="bonus-charge-pip"></span>
+          </div>
+        </div>
       </div>
 
       <!-- Bonus Words Panel -->

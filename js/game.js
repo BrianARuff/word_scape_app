@@ -2,23 +2,42 @@
 
 import { initGrid, pulseWord, revealWord } from "./grid.js";
 import { useHint } from "./hints.js";
-import { generatePuzzle } from "./puzzle-generator.js";
-import { loadState, saveState, showToast } from "./utils.js";
+import { createPuzzleSignature, generatePuzzle } from "./puzzle-generator.js";
+import {
+  createDefaultProgress,
+  exposeProgressDecryptor,
+  loadProgress,
+  queueSaveProgress,
+} from "./progress-store.js";
+import { showToast } from "./utils.js";
 import { destroyWheel, initWheel } from "./wheel.js";
+
+const MAX_SIGNATURE_HISTORY = 25000;
 
 const state = {
   currentLevel: 1,
   foundWords: [],
   bonusWordsFound: [],
   hintsRemaining: 5,
+  bonusWordsTowardHint: 0,
+  usedPuzzleSignatures: [],
 };
 
+let usedSignatureSet = new Set();
+let restoredPuzzle = null;
 let currentPuzzle = null;
 let submitting = false;
 
-export function initGame() {
-  state.currentLevel = loadState("wordscape_level", 1);
-  state.hintsRemaining = loadState("wordscape_hints", 5);
+export async function initGame() {
+  exposeProgressDecryptor();
+  const progress = await loadProgress().catch(() => createDefaultProgress());
+
+  state.currentLevel = progress.currentLevel;
+  state.hintsRemaining = progress.hintsRemaining;
+  state.bonusWordsTowardHint = progress.bonusWordsTowardHint;
+  state.usedPuzzleSignatures = [...progress.usedPuzzleSignatures];
+  usedSignatureSet = new Set(state.usedPuzzleSignatures);
+  restoredPuzzle = progress.currentPuzzle;
 
   document.getElementById("hint-btn").addEventListener("click", onHintClick);
   document.getElementById("reset-btn").addEventListener("click", onResetClick);
@@ -35,13 +54,48 @@ export function initGame() {
   loadLevel(state.currentLevel);
 }
 
-function loadLevel(levelNum) {
-  // Try to restore a saved puzzle for this level (in case of mid-level page refresh)
-  let puzzle = loadState("wordscape_current_puzzle", null);
-  if (!puzzle || puzzle.id !== levelNum) {
-    puzzle = generatePuzzle(levelNum);
-    saveState("wordscape_current_puzzle", puzzle);
+function buildProgressSnapshot(overrides = {}) {
+  return {
+    currentLevel: overrides.currentLevel ?? state.currentLevel,
+    hintsRemaining: overrides.hintsRemaining ?? state.hintsRemaining,
+    bonusWordsTowardHint:
+      overrides.bonusWordsTowardHint ?? state.bonusWordsTowardHint,
+    currentPuzzle:
+      overrides.currentPuzzle !== undefined ? overrides.currentPuzzle : currentPuzzle,
+    usedPuzzleSignatures: [...state.usedPuzzleSignatures],
+  };
+}
+
+function persistProgress(overrides = {}) {
+  void queueSaveProgress(buildProgressSnapshot(overrides));
+}
+
+function registerPuzzleSignature(puzzle) {
+  const signature = puzzle.signature || createPuzzleSignature(puzzle);
+  puzzle.signature = signature;
+
+  if (usedSignatureSet.has(signature)) return;
+  usedSignatureSet.add(signature);
+  state.usedPuzzleSignatures.push(signature);
+
+  if (state.usedPuzzleSignatures.length > MAX_SIGNATURE_HISTORY) {
+    const overflow = state.usedPuzzleSignatures.length - MAX_SIGNATURE_HISTORY;
+    state.usedPuzzleSignatures.splice(0, overflow);
+    usedSignatureSet = new Set(state.usedPuzzleSignatures);
   }
+}
+
+function loadLevel(levelNum) {
+  let puzzle = null;
+
+  // Try to restore a saved puzzle for this level (mid-level page refresh).
+  if (restoredPuzzle && restoredPuzzle.id === levelNum) {
+    puzzle = restoredPuzzle;
+  } else {
+    puzzle = generatePuzzle(levelNum, state.usedPuzzleSignatures);
+  }
+  restoredPuzzle = null;
+  registerPuzzleSignature(puzzle);
 
   currentPuzzle = puzzle;
   state.currentLevel = levelNum;
@@ -60,7 +114,56 @@ function loadLevel(levelNum) {
     initWheel(currentPuzzle.letters, onWordSwiped);
   });
 
+  persistProgress({ currentLevel: levelNum, currentPuzzle: currentPuzzle });
   hideOverlay();
+}
+
+function awardHintsFromBonusWords(count = 1) {
+  state.bonusWordsTowardHint += count;
+  let hintsEarned = 0;
+
+  while (state.bonusWordsTowardHint >= 3) {
+    state.bonusWordsTowardHint -= 3;
+    hintsEarned++;
+  }
+
+  if (hintsEarned > 0) {
+    state.hintsRemaining += hintsEarned;
+    updateHintDisplay();
+  }
+
+  return hintsEarned;
+}
+
+function restartAnimation(el, className) {
+  if (!el) return;
+  el.classList.remove(className);
+  // Reflow so repeated events can replay the same animation class.
+  void el.offsetWidth;
+  el.classList.add(className);
+}
+
+function animateBonusUiGain(hintsEarned) {
+  const bonusBtn = document.getElementById("bonus-btn");
+  const bonusBadge = document.getElementById("bonus-count");
+  const chargeMeter = document.getElementById("bonus-charge-meter");
+  const hintBtn = document.getElementById("hint-btn");
+
+  restartAnimation(bonusBtn, "bonus-gain");
+  restartAnimation(bonusBadge, "bonus-gain");
+  restartAnimation(chargeMeter, "bonus-gain");
+
+  if (hintsEarned > 0) {
+    restartAnimation(chargeMeter, "charge-reset");
+    restartAnimation(hintBtn, "hint-reward");
+  }
+}
+
+function updateBonusChargeMeter() {
+  const pips = document.querySelectorAll(".bonus-charge-pip");
+  pips.forEach((pip, idx) => {
+    pip.classList.toggle("filled", idx < state.bonusWordsTowardHint);
+  });
 }
 
 function onWordSwiped(word) {
@@ -101,8 +204,17 @@ function onWordSwiped(word) {
       return;
     }
     state.bonusWordsFound.push(upperWord);
-    showToast("Bonus word! +1");
+    const hintsEarned = awardHintsFromBonusWords(1);
+    if (hintsEarned > 0) {
+      const label = hintsEarned === 1 ? "hint" : "hints";
+      showToast(`Bonus word! +${hintsEarned} ${label}`);
+    } else {
+      const toNextHint = 3 - state.bonusWordsTowardHint;
+      showToast(`Bonus word! ${toNextHint} to next hint`);
+    }
     updateBonusDisplay();
+    animateBonusUiGain(hintsEarned);
+    persistProgress();
     clearWordDisplay(400);
     return;
   }
@@ -131,19 +243,12 @@ function showLevelComplete() {
     state.currentLevel;
   overlay.classList.add("visible");
 
-  if (state.currentLevel % 3 === 0) {
-    state.hintsRemaining++;
-    saveState("wordscape_hints", state.hintsRemaining);
-    updateHintDisplay();
-    showToast("Bonus hint earned!", 2000);
-  }
-
-  saveState("wordscape_level", state.currentLevel + 1);
-  saveState("wordscape_current_puzzle", null);
+  const nextLevel = state.currentLevel + 1;
+  persistProgress({ currentLevel: nextLevel, currentPuzzle: null });
 
   document.getElementById("next-level-btn").onclick = () => {
     destroyWheel();
-    loadLevel(state.currentLevel + 1);
+    loadLevel(nextLevel);
   };
 }
 
@@ -161,11 +266,11 @@ function onHintClick() {
   const result = useHint(currentPuzzle, state.foundWords);
   if (result.used) {
     state.hintsRemaining--;
-    saveState("wordscape_hints", state.hintsRemaining);
     updateHintDisplay();
+    persistProgress();
 
     // If the hint completed all letters of a word, auto-find it
-    if (result.completed) {
+    if (result.completed && !state.foundWords.includes(result.word)) {
       state.foundWords.push(result.word);
       showToast("Word complete!");
       checkLevelComplete();
@@ -184,6 +289,7 @@ function updateHintDisplay() {
 function updateBonusDisplay() {
   const count = state.bonusWordsFound.length;
   document.getElementById("bonus-count").textContent = count;
+  updateBonusChargeMeter();
 
   const list = document.getElementById("bonus-words-list");
   list.innerHTML = "";
@@ -223,9 +329,15 @@ function onResetClick() {
   if (confirm("Reset all progress? This cannot be undone.")) {
     state.currentLevel = 1;
     state.hintsRemaining = 5;
-    saveState("wordscape_level", 1);
-    saveState("wordscape_hints", 5);
-    saveState("wordscape_current_puzzle", null);
+    state.bonusWordsTowardHint = 0;
+    restoredPuzzle = null;
+    currentPuzzle = null;
+    persistProgress({
+      currentLevel: 1,
+      hintsRemaining: 5,
+      bonusWordsTowardHint: 0,
+      currentPuzzle: null,
+    });
     destroyWheel();
     loadLevel(1);
     showToast("Progress reset");

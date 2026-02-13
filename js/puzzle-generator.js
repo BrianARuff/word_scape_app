@@ -1,12 +1,84 @@
-// Dynamic puzzle generator — creates a new puzzle for each level at runtime.
-// Uses pre-extracted dictionary and seed pools from dictionary.js.
+// Dynamic puzzle generator with progressive difficulty and uniqueness guarantees.
 
-import { commonWords, seedPool } from './dictionary.js';
+import { commonWords, seedPool } from "./dictionary.js";
 
-// Build lookup set once on import
 const commonSet = new Set(commonWords);
+const subAnagramCache = new Map();
 
-// ─── Helpers ───
+const MAX_RANDOM_ATTEMPTS = 160;
+const MAX_LETTER_VARIANTS = 40;
+
+const DIFFICULTY_PROFILES = {
+  easy: {
+    name: "easy",
+    startLevel: 1,
+    seedLengths: [5],
+    minWordLength: 3,
+    maxWordLength: 5,
+    minWords: 5,
+    maxWords: 7,
+    rampEvery: 3,
+    lengthOrder: [3, 4, 5],
+    minLongWords: 0,
+    longWordLength: 5,
+  },
+  medium: {
+    name: "medium",
+    startLevel: 11,
+    seedLengths: [6],
+    minWordLength: 3,
+    maxWordLength: 6,
+    minWords: 7,
+    maxWords: 9,
+    rampEvery: 4,
+    lengthOrder: [4, 5, 3, 6],
+    minLongWords: 1,
+    longWordLength: 6,
+  },
+  challenging: {
+    name: "challenging",
+    startLevel: 21,
+    seedLengths: [6, 7, 7],
+    minWordLength: 4,
+    maxWordLength: 7,
+    minWords: 8,
+    maxWords: 10,
+    rampEvery: 4,
+    lengthOrder: [5, 6, 4, 7],
+    minLongWords: 2,
+    longWordLength: 6,
+  },
+  hard: {
+    name: "hard",
+    startLevel: 31,
+    seedLengths: [7],
+    minWordLength: 4,
+    maxWordLength: 7,
+    minWords: 10,
+    maxWords: 12,
+    rampEvery: 8,
+    lengthOrder: [6, 7, 5, 4],
+    minLongWords: 3,
+    longWordLength: 6,
+  },
+};
+
+function getDifficultyProfile(level) {
+  if (level <= 10) return DIFFICULTY_PROFILES.easy;
+  if (level <= 20) return DIFFICULTY_PROFILES.medium;
+  if (level <= 30) return DIFFICULTY_PROFILES.challenging;
+  return DIFFICULTY_PROFILES.hard;
+}
+
+function getTargetWordCount(level, profile) {
+  const scaledLevel = Math.max(0, level - profile.startLevel);
+  const growth = Math.floor(scaledLevel / profile.rampEvery);
+  return Math.min(profile.maxWords, profile.minWords + growth);
+}
+
+function pickRandom(items) {
+  return items[Math.floor(Math.random() * items.length)];
+}
 
 function getCharFrequency(word) {
   const freq = {};
@@ -15,9 +87,9 @@ function getCharFrequency(word) {
 }
 
 function canFormWord(candidate, sourceFreq) {
-  const cf = getCharFrequency(candidate);
-  for (const ch in cf) {
-    if (!sourceFreq[ch] || cf[ch] > sourceFreq[ch]) return false;
+  const candidateFreq = getCharFrequency(candidate);
+  for (const ch in candidateFreq) {
+    if (!sourceFreq[ch] || candidateFreq[ch] > sourceFreq[ch]) return false;
   }
   return true;
 }
@@ -31,81 +103,226 @@ function shuffle(arr) {
   return a;
 }
 
-// Find all sub-anagrams of a seed word from the common dictionary
 function findSubAnagrams(seed) {
+  if (subAnagramCache.has(seed)) return subAnagramCache.get(seed);
+
   const sourceFreq = getCharFrequency(seed);
   const results = [];
   for (const word of commonWords) {
     if (word.length < 3 || word.length > seed.length) continue;
     if (canFormWord(word, sourceFreq)) results.push(word);
   }
+  subAnagramCache.set(seed, results);
   return results;
 }
 
-// Select which sub-anagrams become puzzle words (randomized each time)
-function selectPuzzleWords(allSubs, seed, level) {
-  const selected = new Set();
+function countLongWords(words, threshold) {
+  let count = 0;
+  for (const word of words) {
+    if (word.length >= threshold) count++;
+  }
+  return count;
+}
 
-  // Always include the seed word itself
-  if (commonSet.has(seed)) selected.add(seed);
+function getWordFamilyKey(word) {
+  const lower = word.toLowerCase();
+  const candidates = [lower];
 
-  // Shuffle so different words get picked each play
-  const shuffled = shuffle(allSubs.filter(w => w !== seed));
-
-  // Group by length
-  const byLength = {};
-  for (const w of shuffled) {
-    const len = w.length;
-    if (!byLength[len]) byLength[len] = [];
-    byLength[len].push(w);
+  if (lower.endsWith("ies") && lower.length > 4) {
+    candidates.push(`${lower.slice(0, -3)}y`);
+  }
+  if (lower.endsWith("es") && lower.length > 3) {
+    candidates.push(lower.slice(0, -2));
+  }
+  if (lower.endsWith("s") && !lower.endsWith("ss") && lower.length > 3) {
+    candidates.push(lower.slice(0, -1));
   }
 
-  // Target count scales with level
-  const targetCount = Math.min(5 + Math.floor((level - 1) / 4), 12);
+  const unique = [...new Set(candidates)];
+  const known = unique.filter(w => commonSet.has(w));
+  if (known.length === 0) return lower;
+  known.sort((a, b) => a.length - b.length || a.localeCompare(b));
+  return known[0];
+}
 
-  // Pick words from each length bucket, spreading evenly
-  const lengths = Object.keys(byLength).map(Number).sort();
+function selectPuzzleWords(candidates, seed, targetCount, profile) {
+  const selected = [];
+  const selectedSet = new Set();
+  const selectedFamilies = new Set();
+
+  function addWord(word) {
+    if (selectedSet.has(word)) return false;
+    const family = getWordFamilyKey(word);
+    if (selectedFamilies.has(family)) return false;
+    selected.push(word);
+    selectedSet.add(word);
+    selectedFamilies.add(family);
+    return true;
+  }
+
+  if (commonSet.has(seed) && candidates.includes(seed)) {
+    addWord(seed);
+  }
+
+  const byLength = new Map();
+  for (const word of shuffle(candidates)) {
+    const len = word.length;
+    if (!byLength.has(len)) byLength.set(len, []);
+    byLength.get(len).push(word);
+  }
+
   let round = 0;
-  while (selected.size < targetCount && round < 8) {
-    for (const len of lengths) {
-      if (selected.size >= targetCount) break;
-      const words = byLength[len];
-      if (round < words.length) {
-        selected.add(words[round]);
-      }
+  while (selected.length < targetCount && round < 24) {
+    for (const len of profile.lengthOrder) {
+      if (selected.length >= targetCount) break;
+      const words = byLength.get(len);
+      if (!words || round >= words.length) continue;
+      addWord(words[round]);
     }
     round++;
   }
 
-  return [...selected].sort((a, b) => a.length - b.length || a.localeCompare(b));
+  if (selected.length < targetCount) {
+    for (const word of shuffle(candidates)) {
+      addWord(word);
+      if (selected.length >= targetCount) break;
+    }
+  }
+
+  if (selected.length < targetCount) return null;
+
+  if (profile.minLongWords > 0) {
+    let longCount = countLongWords(selected, profile.longWordLength);
+    if (longCount < profile.minLongWords) {
+      const availableLongWords = shuffle(
+        candidates.filter(
+          w => w.length >= profile.longWordLength && !selectedSet.has(w)
+        )
+      );
+
+      for (const longWord of availableLongWords) {
+        const longWordFamily = getWordFamilyKey(longWord);
+        if (selectedFamilies.has(longWordFamily)) continue;
+
+        const replaceable = selected
+          .filter(w => w.length < profile.longWordLength && w !== seed)
+          .sort((a, b) => a.length - b.length || a.localeCompare(b));
+        if (replaceable.length === 0) break;
+
+        const removeWord = replaceable[0];
+        const removeIdx = selected.indexOf(removeWord);
+        const removeFamily = getWordFamilyKey(removeWord);
+        if (removeIdx < 0) continue;
+
+        selected.splice(removeIdx, 1);
+        selectedSet.delete(removeWord);
+        selectedFamilies.delete(removeFamily);
+
+        if (!addWord(longWord)) {
+          addWord(removeWord);
+          continue;
+        }
+
+        longCount = countLongWords(selected, profile.longWordLength);
+        if (longCount >= profile.minLongWords) break;
+      }
+    }
+  }
+
+  if (profile.minLongWords > 0) {
+    const longCount = countLongWords(selected, profile.longWordLength);
+    if (longCount < profile.minLongWords) return null;
+  }
+
+  return selected
+    .slice(0, targetCount)
+    .sort((a, b) => a.length - b.length || a.localeCompare(b));
 }
 
-// Generate a fresh puzzle for the given level number.
-export function generatePuzzle(level) {
-  // Determine seed length based on level difficulty
-  let seedLength;
-  if (level <= 8) seedLength = 5;
-  else if (level <= 17) seedLength = 6;
-  else seedLength = 7;
+export function createPuzzleSignature(puzzle) {
+  const seed = typeof puzzle.seed === "string" ? puzzle.seed.toUpperCase() : "";
+  const letters = Array.isArray(puzzle.letters)
+    ? puzzle.letters.map(ch => String(ch).toUpperCase()).join("")
+    : "";
+  const words = Array.isArray(puzzle.words)
+    ? [...puzzle.words]
+        .map(word => String(word).toUpperCase())
+        .sort((a, b) => a.localeCompare(b))
+        .join(",")
+    : "";
+  const seedPart = seed || letters;
+  return `${seedPart}|${letters}|${words}`;
+}
 
-  // Pick a random seed from the pool
-  const pool = seedPool[seedLength];
-  const seed = pool[Math.floor(Math.random() * pool.length)];
-
-  // Find all sub-anagrams
+function buildPuzzleFromSeed(level, profile, seed, usedSet) {
   const allSubs = findSubAnagrams(seed);
+  const eligible = allSubs.filter(
+    w => w.length >= profile.minWordLength && w.length <= profile.maxWordLength
+  );
 
-  // Select puzzle words (randomized)
-  const puzzleWords = selectPuzzleWords(allSubs, seed, level);
-  const puzzleSet = new Set(puzzleWords);
+  const targetCount = getTargetWordCount(level, profile);
+  if (eligible.length < targetCount) return null;
 
-  // Bonus words: remaining sub-anagrams not selected as puzzle words
-  const bonusWords = allSubs.filter(w => !puzzleSet.has(w));
+  const puzzleWords = selectPuzzleWords(eligible, seed, targetCount, profile);
+  if (!puzzleWords || puzzleWords.length < targetCount) return null;
 
-  return {
-    id: level,
-    letters: shuffle(seed.toUpperCase().split('')),
-    words: puzzleWords.map(w => w.toUpperCase()),
-    bonusWords: bonusWords.map(w => w.toUpperCase()),
-  };
+  const puzzleWordSet = new Set(puzzleWords);
+  const wordsUpper = puzzleWords.map(w => w.toUpperCase());
+  const seedUpper = seed.toUpperCase();
+  const seedLetters = seedUpper.split("");
+
+  for (let i = 0; i < MAX_LETTER_VARIANTS; i++) {
+    const letters = shuffle(seedLetters);
+    const signature = createPuzzleSignature({
+      seed: seedUpper,
+      letters,
+      words: wordsUpper,
+    });
+    if (usedSet.has(signature)) continue;
+
+    return {
+      id: level,
+      seed: seedUpper,
+      letters,
+      words: wordsUpper,
+      bonusWords: allSubs
+        .filter(w => !puzzleWordSet.has(w) && w.length >= 3)
+        .map(w => w.toUpperCase()),
+      difficulty: profile.name,
+      signature,
+    };
+  }
+
+  return null;
+}
+
+export function generatePuzzle(level, usedSignatures = []) {
+  const usedSet =
+    usedSignatures instanceof Set
+      ? usedSignatures
+      : new Set(Array.isArray(usedSignatures) ? usedSignatures : []);
+  const profile = getDifficultyProfile(level);
+
+  for (let attempt = 0; attempt < MAX_RANDOM_ATTEMPTS; attempt++) {
+    const seedLength = pickRandom(profile.seedLengths);
+    const pool = seedPool[seedLength];
+    if (!pool || pool.length === 0) continue;
+    const seed = pickRandom(pool);
+    const puzzle = buildPuzzleFromSeed(level, profile, seed, usedSet);
+    if (puzzle) return puzzle;
+  }
+
+  const uniqueSeedLengths = [...new Set(profile.seedLengths)];
+  for (const seedLength of uniqueSeedLengths) {
+    const pool = shuffle(seedPool[seedLength] || []);
+    for (const seed of pool) {
+      const retries = profile.name === "hard" ? 4 : 2;
+      for (let i = 0; i < retries; i++) {
+        const puzzle = buildPuzzleFromSeed(level, profile, seed, usedSet);
+        if (puzzle) return puzzle;
+      }
+    }
+  }
+
+  throw new Error("Unable to generate a unique puzzle for this level.");
 }
