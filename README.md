@@ -1,1 +1,3 @@
-# word_scape_app
+### Word Scape App
+
+[Play Game](https://word-scape-app.netlify.app/)
